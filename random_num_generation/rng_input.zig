@@ -57,9 +57,6 @@ pub fn main() !void {
         std.process.exit(1);
     };
 
-    try stdout.print("Num of arguments {d}\n", .{sample});
-    try stdout.flush();
-
     var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         try std.posix.getrandom(std.mem.asBytes(&seed));
@@ -124,7 +121,7 @@ pub fn main() !void {
 
                     a = try std.fmt.parseFloat(T, a_tok);
                     b = try std.fmt.parseFloat(T, b_tok);
-                    std.debug.print(
+                    try stdout.print(
                         "Line {d}: Uniform({d:.6}, {d:.6})\n",
                         .{ line_no, a, b },
                     );
@@ -137,7 +134,7 @@ pub fn main() !void {
 
                     lambda_w = try std.fmt.parseFloat(T, lambda_tok);
                     k      = try std.fmt.parseFloat(T, k_tok);
-                    std.debug.print(
+                    try stdout.print(
                         "Line {d}: Weibull(λ={d:.6}, k={d:.6})\n",
                         .{ line_no, lambda_w, k },
                     );
@@ -147,7 +144,7 @@ pub fn main() !void {
                 if (std.mem.eql(u8, tok, "Exponential")) {
                     const lambda_tok = tok_it.next() orelse return error.MalformedExpLine;
                     lambda_e = try std.fmt.parseFloat(T, lambda_tok);
-                    std.debug.print(
+                    try stdout.print(
                         "Line {d}: Exponential(λ={d:.6})\n",
                         .{ line_no, lambda_e },
                     );
@@ -160,14 +157,14 @@ pub fn main() !void {
 
                     gamma = try std.fmt.parseFloat(T, shape_tok);   // often called “α” (shape)
                     x0     = try std.fmt.parseFloat(T, scale_tok);   // often called “β” (scale)
-                    std.debug.print(
+                    try stdout.print(
                         "Line {d}: Gamma(shape={d:.6}, scale={d:.6})\n",
                         .{ line_no, gamma, x0 },
                     );
                     continue;
                 }
 
-                std.debug.print(
+                try stdout.print(
                     "Line {d}: warning – unknown token '{s}' – ignoring rest of line.\n",
                     .{ line_no, tok },
                 );
@@ -185,22 +182,28 @@ pub fn main() !void {
         x0 = 8;
         gamma = 7;
         lambda_e = 2;
+
     }
-   
+    try stdout.flush();
+
+
     var unif_sample: ArrayList(T) = try runifSampleAlloc(&gpa, sample, T, a, b, &rand);
     defer unif_sample.deinit(gpa);
-    try write_sample_to_file("uniform.csv", T, unif_sample);
 
     var weibull_sample: ArrayList(T) = try rwbSampleAlloc(&gpa, sample, T, lambda_w, k, &rand);
     defer weibull_sample.deinit(gpa);
-    try write_sample_to_file("weibull.csv", T, weibull_sample);
 
     var exp_sample: ArrayList(T) = try rexpSampleAlloc(&gpa, sample, T, lambda_e, &rand);
     defer exp_sample.deinit(gpa);
-    try write_sample_to_file("exponential.csv", T, exp_sample);
 
     var gamma_sample: ArrayList(T) = try rgammaSampleAlloc(&gpa, sample, T, gamma, x0, &rand);
     defer gamma_sample.deinit(gpa);
+
+    try stdout.print("All data generated, writing to file...\n", .{});
+    try stdout.flush();
+    try write_sample_to_file("uniform.csv", T, unif_sample);
+    try write_sample_to_file("weibull.csv", T, weibull_sample);
+    try write_sample_to_file("exponential.csv", T, exp_sample);
     try write_sample_to_file("gamma.csv", T, gamma_sample);
 }
 
