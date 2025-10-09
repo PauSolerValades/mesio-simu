@@ -12,8 +12,7 @@ def main() -> None:
         sample = read_sample_file(file_path)
         
         plt.figure(figsize=(10, 6))
-
-        plt.hist(sample, bins='auto', color='skyblue', edgecolor='black', alpha=0.7)
+        plt.hist(sample, bins=100, color='skyblue', edgecolor='black', alpha=0.7)
 
         plt.title(f"Distribution of {file_path.name} Data", fontsize=16)
         plt.xlabel('Value Bins', fontsize=12)

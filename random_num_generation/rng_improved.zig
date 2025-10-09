@@ -16,6 +16,7 @@ const HELP =
     \\ - Exponential: 
     \\ - Weibull: 
     \\ - Gamma: 
+    \\ - Cauchy
     \\
     \\ The script requires an int n as the number of samples to generate. Feel free to write any number needed.  
 ;
@@ -67,8 +68,6 @@ pub fn main() !void {
     const T: type = f64; 
     var parameters_found = true; 
     const maybe_file = std.fs.cwd().openFile("parameters.txt", .{}) catch |err| blk: {
-        // Inside the blk we can do any amount of work we want.
-        // At the end we must produce a value of type `?std.fs.File`.
         switch (err) {
             error.FileNotFound => {
                 try stdout.print(
@@ -78,7 +77,6 @@ pub fn main() !void {
                 parameters_found = false;
             },
             else => {
-                // Any other error (permission denied, etc.)
                 try stdout.print(
                     "Failed to load parameters.txt ({}) – using defaults\n",
                     .{err},
@@ -86,9 +84,6 @@ pub fn main() !void {
                 parameters_found = false;
             },
         }
-        // <<< This is the block’s final expression – it becomes the value
-        // returned from the `catch`.  Here we return `null` because we could
-        // not obtain a file.
         break :blk null;
     };    
 
@@ -99,7 +94,8 @@ pub fn main() !void {
     var x0: f64 = undefined;
     var gamma: f64 = undefined;
     var lambda_e: f64 = undefined;
-
+    var shape: u32 = undefined;
+    var scale: f64 = undefined;
 
     if (maybe_file) |file| {
         defer file.close();
@@ -126,9 +122,7 @@ pub fn main() !void {
                         .{ line_no, a, b },
                     );
                     continue; // go to next line
-                }
-
-                if (std.mem.eql(u8, tok, "Weibull")) {
+                } else if (std.mem.eql(u8, tok, "Weibull")) {
                     const lambda_tok = tok_it.next() orelse return error.MalformedWeibullLine;
                     const k_tok      = tok_it.next() orelse return error.MalformedWeibullLine;
 
@@ -139,9 +133,7 @@ pub fn main() !void {
                         .{ line_no, lambda_w, k },
                     );
                     continue;
-                }
-
-                if (std.mem.eql(u8, tok, "Exponential")) {
+                } else if (std.mem.eql(u8, tok, "Exponential")) {
                     const lambda_tok = tok_it.next() orelse return error.MalformedExpLine;
                     lambda_e = try std.fmt.parseFloat(T, lambda_tok);
                     try stdout.print(
@@ -149,25 +141,36 @@ pub fn main() !void {
                         .{ line_no, lambda_e },
                     );
                     continue;
-                }
-
-                if (std.mem.eql(u8, tok, "Gamma")) {
+                } else if (std.mem.eql(u8, tok, "Cauchy")) {
                     const shape_tok = tok_it.next() orelse return error.MalformedGammaLine;
                     const scale_tok = tok_it.next() orelse return error.MalformedGammaLine;
 
                     gamma = try std.fmt.parseFloat(T, shape_tok);   // often called “α” (shape)
                     x0     = try std.fmt.parseFloat(T, scale_tok);   // often called “β” (scale)
                     try stdout.print(
-                        "Line {d}: Gamma(shape={d:.6}, scale={d:.6})\n",
+                        "Line {d}: Cauchy(shape={d:.6}, scale={d:.6})\n",
                         .{ line_no, gamma, x0 },
                     );
                     continue;
-                }
+                } else if (std.mem.eql(u8, tok, "Gamma")){
+                    const shape_tok = tok_it.next() orelse return error.MalformedCauchyLine;
+                    const scale_tok = tok_it.next() orelse return error.MalformedCauchyLine;
+
+                    shape = try std.fmt.parseInt(u32, shape_tok, 10);   // often called “α” (shape)
+                    scale = try std.fmt.parseFloat(T, scale_tok);       // often called “β” (scale)
+                    try stdout.print(
+                        "Line {d}: Gamma(shape={d:.6}, scale={d:.6})\n",
+                        .{ line_no, shape, scale},
+                    );
+                    continue;
+
+                } else {
 
                 try stdout.print(
                     "Line {d}: warning – unknown token '{s}' – ignoring rest of line.\n",
                     .{ line_no, tok },
                 );
+                }
                 break; // stop processing this line; move to the next one
             }
         } else |err| switch (err) {
@@ -182,10 +185,10 @@ pub fn main() !void {
         x0 = 8;
         gamma = 7;
         lambda_e = 2;
-
+        shape = 10;
+        scale = 2.0;
     }
     try stdout.flush();
-
 
     var unif_sample: ArrayList(T) = try runifSampleAlloc(&gpa, sample, T, a, b, &rand);
     defer unif_sample.deinit(gpa);
@@ -196,7 +199,10 @@ pub fn main() !void {
     var exp_sample: ArrayList(T) = try rexpSampleAlloc(&gpa, sample, T, lambda_e, &rand);
     defer exp_sample.deinit(gpa);
 
-    var gamma_sample: ArrayList(T) = try rgammaSampleAlloc(&gpa, sample, T, gamma, x0, &rand);
+    var cauchy_sample: ArrayList(T) = try rcauchySampleAlloc(&gpa, sample, T, gamma, x0, &rand);
+    defer cauchy_sample.deinit(gpa);
+
+    var gamma_sample: ArrayList(T) = try rgammaSampleAlloc(&gpa, sample, T, shape, scale, &rand);
     defer gamma_sample.deinit(gpa);
 
     try stdout.print("All data generated, writing to file...\n", .{});
@@ -205,6 +211,7 @@ pub fn main() !void {
     try write_sample_to_file("weibull.csv", T, weibull_sample);
     try write_sample_to_file("exponential.csv", T, exp_sample);
     try write_sample_to_file("gamma.csv", T, gamma_sample);
+    try write_sample_to_file("cauchy.csv", T, cauchy_sample);
 }
 
 /// Generate a random number of a uniform distribution
@@ -271,8 +278,29 @@ fn rexpSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, lambda: T, r
     return sample;
 }
 
-/// Generate a sample of a Gamma distribution of gamma and x0.
-fn rgammaSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, gamma: T, x0: T, rng: *Random) !ArrayList(T) {
+/// Generate a gamma distrubution taking into account that a gamma is the sum of exponentials.
+///
+fn rgammaSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, shape: u32, scale: T, rng: *Random) !ArrayList(T) {
+
+    var sample: ArrayList(T) = .empty;
+    try sample.ensureTotalCapacity(allocator.*, n);
+
+    for (0..n) |_| {
+        var g: T = 0.0;
+        // sum of exponentials
+        for (0..shape) |_| {
+            const u = try runif(T, 0, 1, rng);
+            g -= @log(u);
+        }
+        g *= scale; 
+        _ = try sample.append(allocator.*, g);
+    }
+
+    return sample;
+}
+
+
+fn rcauchySampleAlloc(allocator: *Allocator, n: u32, comptime T: type, gamma: T, x0: T, rng: *Random) !ArrayList(T) {
     var sample: ArrayList(T) = .empty;
     try sample.ensureTotalCapacity(allocator.*, n);
 
@@ -284,7 +312,6 @@ fn rgammaSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, gamma: T, 
 
     return sample;
 }
-
 
 fn write_sample_to_file(name: []const u8, comptime T: type, sample: ArrayList(T)) !void {
     const cwd = std.fs.cwd();

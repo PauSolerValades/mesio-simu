@@ -2,3 +2,5 @@ Uniform 0 1
 Weibull 2 2
 Exponential 2
 Gamma 2 2
+Cauchy 5 0
+
