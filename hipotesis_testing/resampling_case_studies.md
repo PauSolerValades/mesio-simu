@@ -1,28 +1,3 @@
-# Case study 1
-
-Vins:
-
-Pregunta: la valoració del vi va relacionada amb l'ambient.
-$H_0: mu_A = mu_b = mu_c$
-$H_A: mu_A > mu_b > mu_c$
-
-(ANOVA d'un factor, perque tenim 3 punts)
-Permutem 
-
-# Case Study 2 (difícil)
-
-La mateixa que el primer però canviant que només hi ha 8 persones.
-
-(Bloques aleatorizados) RANDOM BLOCK: individu com a font de variabilitat.
-Hem de permutar el block. Cada individu pot estar en 6 permutacions diferents (3!). permutem per individu
-Permutacions totals: (3!)^N. Permutem per columna i no per fila.
-
-3) Utilitzem l'estadístic F
-
-# Case study 3 (fàcil)
-
-Pregunta: Si l'aspirina afecta a la densitat de la sang.
-
 2) (2!)^N
 $delta = A - B$: temps de pendre l'aspirina menys el temps de no perdre-la.
 
