@@ -108,18 +108,6 @@ pub fn main() !void {
     try stdout.print("Avg Time elapsed norm: {d}\n", .{avg_normal});
     try stdout.print("Vector Size: {d}\n", .{VEC_LEN});
 
-    // var weibull_sample: ArrayList(T) = try rwbSampleAlloc(&gpa, sample, T, lambda_w, k, &rand);
-    // defer weibull_sample.deinit(gpa);
-    //
-    // var exp_sample: ArrayList(T) = try rexpSampleAlloc(&gpa, sample, T, lambda_e, &rand);
-    // defer exp_sample.deinit(gpa);
-    //
-    // var cauchy_sample: ArrayList(T) = try rcauchySampleAlloc(&gpa, sample, T, gamma, x0, &rand);
-    // defer cauchy_sample.deinit(gpa);
-    //
-    // var gamma_sample: ArrayList(T) = try rgammaSampleAlloc(&gpa, sample, T, shape, scale, &rand);
-    // defer gamma_sample.deinit(gpa);
-    //
     try stdout.flush();
 }
 
@@ -135,6 +123,19 @@ fn runif(comptime T: type, a: T, b: T, rng: *Random) !T {
     }
     // scale if needed 
     return a + (b - a) * rng.float(T);
+}
+
+/// Generate an sample of a uniform distribution [a,b) 
+fn runifSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, a: T, b: T, rng: *Random) !ArrayList(T) {
+    var sample: ArrayList(T) = .empty;
+    try sample.ensureTotalCapacity(allocator.*, n);
+
+    for (0..n) |_| {
+        const u = try runif(T, a, b, rng);
+        _ = try sample.append(allocator.*, u);
+    }
+
+    return sample;
 }
 
 
@@ -173,82 +174,6 @@ fn runifSampleAllocSIMD(allocator: *Allocator, n: u32, comptime T: type, a: T, b
             const u = try runif(T, a,b, rng);
             _ = try sample.append(allocator.*, u);
         }        
-    }
-
-    return sample;
-}
-
-/// Generate an sample of a uniform distribution [a,b) 
-fn runifSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, a: T, b: T, rng: *Random) !ArrayList(T) {
-    var sample: ArrayList(T) = .empty;
-    try sample.ensureTotalCapacity(allocator.*, n);
-
-    for (0..n) |_| {
-        const u = try runif(T, a, b, rng);
-        _ = try sample.append(allocator.*, u);
-    }
-
-    return sample;
-}
-
-/// Generate a sample of a Weibull distribution of lambda and k.
-fn rwbSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, lambda: T, k: T, rng: *Random) !ArrayList(T) {
-    var sample: ArrayList(T) = .empty;
-    try sample.ensureTotalCapacity(allocator.*, n);
-
-    for (0..n) |_| {
-        const u = try runif(T, 0, 1, rng);
-        const w = lambda*(std.math.pow(T, -@log(u), 1.0 / k));
-        _ = try sample.append(allocator.*, w);
-    }
-
-    return sample;
-}
-
-/// Generate a sample of a Exponential distribution of parameter lambda.
-fn rexpSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, lambda: T, rng: *Random) !ArrayList(T) {
-    var sample: ArrayList(T) = .empty;
-    try sample.ensureTotalCapacity(allocator.*, n);
-
-    for (0..n) |_| {
-        const u = try runif(T, 0, 1, rng);
-        const e = lambda*(-@log(u));
-        _ = try sample.append(allocator.*, e);
-    }
-
-    return sample;
-}
-
-/// Generate a gamma distrubution taking into account that a gamma is the sum of exponentials.
-///
-fn rgammaSampleAlloc(allocator: *Allocator, n: u32, comptime T: type, shape: u32, scale: T, rng: *Random) !ArrayList(T) {
-
-    var sample: ArrayList(T) = .empty;
-    try sample.ensureTotalCapacity(allocator.*, n);
-
-    for (0..n) |_| {
-        var g: T = 0.0;
-        // sum of exponentials
-        for (0..shape) |_| {
-            const u = try runif(T, 0, 1, rng);
-            g -= @log(u);
-        }
-        g *= scale; 
-        _ = try sample.append(allocator.*, g);
-    }
-
-    return sample;
-}
-
-
-fn rcauchySampleAlloc(allocator: *Allocator, n: u32, comptime T: type, gamma: T, x0: T, rng: *Random) !ArrayList(T) {
-    var sample: ArrayList(T) = .empty;
-    try sample.ensureTotalCapacity(allocator.*, n);
-
-    for (0..n) |_| {
-        const u = try runif(T, 0, 1, rng);
-        const e = x0 + gamma * @tan(std.math.pi*(u - 0.5));
-        _ = try sample.append(allocator.*, e);
     }
 
     return sample;
