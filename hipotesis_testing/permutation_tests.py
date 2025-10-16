@@ -217,7 +217,7 @@ def _(mo):
 
     Al primer cas d'estudi, permutavem l'etiqueta A, B o C segons el grup. Ara però, no té sentit permutar etiquetes de persones diferents, així que per a cada individu només tenim $3!$ posicions. Sabent el nombre de mostres obtenim
 
-    $$R_3_^8 = (3!)^8$$
+    $$R_3^8 = (3!)^8$$
     """
     )
     return
@@ -254,15 +254,15 @@ def _(df1, np):
         # Recursive Step
         # 1. Get all combinations from the REST of the lists.
         combinations_from_rest = get_all_combinations_recursive(list_of_lists[1:])
-    
+
         # 2. Get the choices from the CURRENT list.
         current_choices = list_of_lists[0]
-    
+
         all_combinations = []
         for choice in current_choices:
             for combo in combinations_from_rest:
                 all_combinations.append([choice] + combo)
-            
+
         return all_combinations
 
     #all_combinations = get_all_combinations_recursive(combinations_per_individual)
@@ -305,10 +305,35 @@ def _(all_combinations_colums, n_resamples, np, stats):
 
 
 @app.cell
+def _(f_sample, f_statistics_mc, plt):
+    plt.figure()
+    plt.hist(f_statistics_mc, bins=30)
+    plt.axvline(x=f_sample)
+    plt.show()
+    return
+
+
+@app.cell
 def _(f_sample, f_statistics_mc, n_resamples):
     extreme_observations_2 = (sum((f_sample <= f_statistic for f_statistic in f_statistics_mc)) + 1)
     pvalue_2 = extreme_observations_2 / (n_resamples +1)
     print(f"El p-valor és de {pvalue_2:.3e}. Hi ha {extreme_observations_2} observacions sobre F mostral")
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ## 5. Conclusió
+
+    El valor del $p$-valor és de 0.34. Aquest valor es pot considerar significatiu amb una magnitud considerable, per tant ens dona motius per anar en contra de la $H_0$ i que l'esdeveniment no sigui a causa d'una fluctuaicó aleatòria.
+
+    És veritat que el $p$ valor actual és més gran que no pas el del cas d'estudi 1. En aquell cas, estem molt més segurs sobre que no és cosa aleatòria, sinó que és un valor poc probable sota la hipòtesi nul·la, ja que la magnitud és important.
+
+    # Cas d'estudi 3: Aspirina i Sagnrat
+    """
+    )
     return
 
 
