@@ -345,6 +345,8 @@ FM <- numeric(nperm)
 Still and White (1981) follow Edgington in using restricted randomization for main effects, but they control for main effects by **using residuals**.
 In this case the residuals are what is left over after you **remove row and column effects**. 
 
+Aquest és el primer test que controla bé el paràmetre de la interacció!
+
 ## SW Step 2: What and How
 
   - First: Interaction test 
@@ -352,7 +354,9 @@ In this case the residuals are what is left over after you **remove row and colu
 If you look at all of your data combined, there are potential **main effects** (in our case Method) included in them. But if we subtract out those effects and use the residuals that result, **we can test the interaction without worrying about main effects**.
 
 
-One simple way to do this is $\epsilon_{ijk} = Y_{ijk} - \bar{Y}_{i.} - \bar{Y}_{.j} + \bar {Y}_{...}$.
+One simple way to do this is $\epsilon_{ijk} = Y_{ijk} - \bar{Y}_{i.} - \bar{Y}_{.j} + \bar {Y}_{...}$. NOTA: com que resta dues vegades la \bar{Y} el que fa per compensar-ho és sumar-la una altra vegada!
+Aquest canvi és completament conceptual.
+
 
 In other words, 
   
@@ -365,7 +369,8 @@ In other words,
   
   - When it comes to the main effects, `Still and White follow` Edgington's lead and will obtain the same results (above section)
   
-  
+ 
+ Nòtis que el model lineal només modelitza les dues variables, la mitjana va directament al resdiu tal com s'ha parlat.
 ```{r}
 #  Es pot fer obtenint la interacció a partir del residus de la forma següent
 #  Y[ij] - Ybar[i,] - Ybar[.j] + Ybar[..]
@@ -374,7 +379,7 @@ In other words,
 # Aquestes seren les "noves dades" a partir de les qual nomes avaluarem interacció
 
 # Model aditiu
-mod2 <- lm(ppvm ~ soil+ method)
+mod2 <- lm(ppvm ~ soil+ method) # NO HI POSO EL RESIDU A PROPÒSIT! 
 residus <- mod2$residuals   # These are the residuals from the additive model
 ```
 
@@ -385,6 +390,9 @@ set.seed(1234)
 SWint <- numeric(nperm)
 #Finteract
 
+# utilitzes els resdius com a dataset, perque n'hi ha un per a cada observació
+# repetim la idea de manley, tots amb tots però ara ja estàs mirant les interaccions
+# que han quedat al resiu adequadament.
 for (i in 1:nperm) {
   newppvm <- sample(residus, 24, replace = FALSE) 
   mod7 <- summary(aov(newppvm ~ soil + method + soil:method)) 
@@ -413,15 +421,15 @@ abline(v=Finteract, col="red", lwd = 4, lty = 4)
 
   - The solutions given here are not the only possibilities, but they cover the important ones in **crossed factorial designs**
 
-  - In any case, if you want to go deeper into the subject, the article `Anderson et al (2001)' is excellent.
+  - In any case, if you want to go deeper into the subject, the article `Anderson et al (2001)` is excellent.
 
   - Basically, he suggests using a Manly-like test for interaction, where you use unrestricted permutation of raw observations across all cells. This is particularly useful with small samples. When it comes to testing main effects, Anderson suggests permuting residuals under the reduced model. This is equivalent to calculating the residuals from an additive model and then randomizing them in the same way that Edgington would randomize the observations, that is, by restricting the randomizations to individual levels of the other variable
 
+El que és més complicat és saber què és el que es pot permutar, aquesta és la part difícil de veure :(
 
 # References
 
   - Anderson, M. J. (2001) Permutation tests for univariate or multivariate analysis of variance and regression. Canadian Journal of Fisheries and Aquatic Science, 58, 626-639.
-
   - Edgington, E. S. and Onghena, P. (2007) Randomization Tests (4th ed.)London, Chapman & Hall.
 
   - Manly, B. F. J. (2007) Randomization, Bootstrap, and Monte Carlo Methods in Biology (3rd ed.), London: Chapman & Hall.
