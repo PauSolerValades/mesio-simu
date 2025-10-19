@@ -69,12 +69,12 @@ def _(mo):
     Definim l'error de tipus 2 $\beta$ com l'error d'equivocar-nos no rebutjant $H_0$ quan resulta que $H_0$ era falsa.
 
     $$
-    \beta = \mathbb{P}(\textbf{X} \notin R_\alpha | H_0 \text{false}) = sup_{\theta_1 \in \Theta_1} \mathbb{P}_{\theta_1}(\mathbb{X} \notin R_\alpha)
+    \beta = \mathbb{P}(\textbf{X} \notin R_\alpha | H_0 \text{false}) = \sup_{\theta_1 \in \Theta_1} \mathbb{P}_{\theta_1}(\mathbb{X} \notin R_\alpha)
     $$
 
     $\beta$ és quants falsos negatius ens volem permetre.
 
-    La fixem en el seu estàndard habitual $1-\beta = 0.2 \Rightarrow \beta = 0.8$
+    La fixem en el seu estàndard habitual $\beta = 0.2$
 
     Amb l'elecció d'aquests dos valors, la regió crítica (o regió de rebuig) $R_\alpha$ ha quedat explícitament determinada, ho veurem al següent apartat.
     """
@@ -92,7 +92,11 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    ## 5. Càlcul del tamany mostral $n$
+    ## 5. Test Òptim
+
+    Ja sabem que amb el Z-test el UMP és el que ha de ser, el que tenim.
+
+    ## 6. Càlcul del tamany mostral $n$
 
     Primer, repàs de l'estadístic $Z$. Tenint una srs $X_1 \ldots X_n \sim N(\mu, \sigma^2)$ sabem que sota $H_0$ podem estandaritzar la normal
 
@@ -572,7 +576,7 @@ def _(mo):
     n = \frac{\sigma^2 (z_{\alpha/2} - z_{1-\beta})^2}{(\mu_1 - \mu_0)^2} = \frac{\sigma^2 (z_{\alpha/2} + z_{1-\beta})^2}{d^2} 
     $$
 
-    On recordem que $d$ era el tamany de l'effecte. Aquesta fòrmula és fantàstica, perque relaciona totes les quantitats que s'han hagut d'escollit a priori pel test. Anem-la a calcular pel nostre cas.
+    On recordem que $d$ era el tamany de l'effecte. Aquesta fòrmula és fantàstica, perque relaciona totes les quantitats que s'han hagut d'escollit a priori pel test. A més a més, també relaciona el "poder del test" $1-\beta$ en comptes de amb l'error tipus II usant que $z_\beta = - z_{1-\beta}$. Anem-la a calcular pel nostre cas.
 
     Com que $d = \mu_0 - \mu_1 > 2$ i $\mu_0 = 0$, això vol dir que el mínim valor de la hipòtesi alternativa a considerar serà $\mu_1$, ja que és el mínim del que volem detectar. Si detectem quantitats més grans, doncs tampoc passa res
     """
@@ -582,19 +586,22 @@ def _(mo):
 
 @app.cell
 def _(z_a2, z_beta):
+    import math
+
     mu_0 = 0
     d = (mu_0-2)**2
     sigma = 5 
     n = (sigma*(z_a2 - z_beta)**2)/d
-    print(n)
-    return mu_0, n, sigma
+    n_sample = math.ceil(n)
+    print(f"Valor d'n és {n}, tamany mostral ha de ser de {n_sample}")
+    return math, mu_0, n, n_sample, sigma
 
 
 @app.cell
-def _(mo):
+def _(math, mo, n):
     mo.md(
-        r"""
-    Per tant, només amb només 10 mostres serem capaços de garantir resultats amb els paràmetres demanats.
+        rf"""
+    Per tant, només amb només {math.ceil(n)} mostres serem capaços de garantir resultats amb els paràmetres demanats.
 
     ## 7. Valors crítics
 
@@ -609,13 +616,100 @@ def _(mu_0, n, sigma, z_a2):
     from math import sqrt, ceil
 
     C_s = mu_0 + z_a2*sigma/sqrt(ceil(n))
-    C_s
+    C_i = mu_0 - z_a2*sigma/sqrt(ceil(n))
+
+    print(f"C_i = {C_i}\nC_s = {C_s}")
+    C_i, C_s
+    return C_s, sqrt
+
+
+@app.cell
+def _():
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""I amb això completem els passos a priori!!!""")
+    mo.md(
+        r"""
+    Ja hem acabat tots els passos __a priori__ del test d'hipòtesi neyman-pearson. A la vida real ara es faria l'experiment, es recolliriren les mostres i un cop tractades es pot entrar a avaluar les hipòtesis.
+
+    A la següent casella es genera una mostra que hauria de rebutjar la hipòtesi nul·la
+    """
+    )
+    return
+
+
+@app.cell
+def _(n_sample, norm, np, sigma):
+    # generem una mostra per fer l'experiment. Generem dues distribucions normals amb la mateixa sigma = 5 i les restem.
+    mu_0s, mu_1s = 6, 3.5
+    abans = np.array([norm.rvs(loc=mu_0s, scale=sigma) for _ in range(n_sample)])
+    despres = np.array([norm.rvs(loc=mu_1s, scale=sigma) for _ in range(n_sample)])
+
+    X = despres - abans
+    return X, mu_0s
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ## 8. Càlcul de l'estadístic
+
+    Hem de calcular el valor de l'estadístic Z-test. Aleshores
+    """
+    )
+    return
+
+
+@app.cell
+def _(X, mu_0s, n_sample, sigma, sqrt):
+    X_avg = X.mean()
+    Z = sqrt(n_sample)*(X_avg - mu_0s) / sigma
+    print(f"Mitjana mostral: {X_avg}. Valor de l'estadístic: {Z}")
+    return X_avg, Z
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ## 9. Resultat
+
+    El Z-test rebutja $H_0$ si $|Z| > z_{\alpha/2}$. Comprovem-ho
+    """
+    )
+    return
+
+
+@app.cell
+def _(Z, math, z_a2):
+    math.fabs(Z) > z_a2
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""Efectivament es rebutja la hipòtesi nul·la! Cal dir que aquesta condició és totalment equivalent a expresar-la en funció de $C = C_s = -C_i$ fent la mateixa condició però amb la mitjana mostral, és a dir, es rebutja la hipòtesi nul·la si la mitjana mostral és dins la regió crítica, ergo: $|\bar{X}_n| > C$""")
+    return
+
+
+@app.cell
+def _(C_s, X_avg, math):
+    result = "Rebutjem la hipòtesi nul·la" if math.fabs(X_avg) > C_s else "Acceptem la hipòtesi nul·la"
+    print(result)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""Per acabar-ho d'entendre, podriem dibuixar la $H_0$ nul·la altre vegada, amb els valors de C i de la mitjana mostral, juntament amb la normal estandaritzada i els valor de l'estadístic.""")
+    return
+
+
+@app.cell
+def _():
     return
 
 
