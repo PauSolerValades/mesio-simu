@@ -74,7 +74,7 @@ def _(mo):
 
     $\beta$ és quants falsos negatius ens volem permetre.
 
-    La fixem en el seu estàndard habitual $\beta = 0.2$
+    La fixem en el seu estàndard habitual $\beta = 0.2$. L'error tipus II implicita l'elecció del poder del test $1-\beta = 0.8$, que és molts cops és més intiuïtitu preguntar-se "quin és el millor test que puc fer" que no la definició d'error tipus II.
 
     Amb l'elecció d'aquests dos valors, la regió crítica (o regió de rebuig) $R_\alpha$ ha quedat explícitament determinada, ho veurem al següent apartat.
     """
@@ -84,7 +84,7 @@ def _(mo):
 
 @app.cell
 def _():
-    beta = 0.8
+    beta = 0.2
     return (beta,)
 
 
@@ -142,7 +142,7 @@ def _():
         x_left = np.linspace(x_range[0], C_i, 200)
         y_left = norm.pdf(x_left, loc=mu, scale=sigma)
         ax.fill_between(x_left, y_left, color='orange', alpha=0.4, label=label)
-    
+
         # Cua dreta
         x_right = np.linspace(C_s, x_range[1], 200)
         y_right = norm.pdf(x_right, loc=mu, scale=sigma)
@@ -222,20 +222,20 @@ def _(mo):
 
 @app.cell
 def _(alpha, norm, np):
-    z_a2 = norm.ppf(alpha/2)
-    min_z_a2 = norm.ppf(1 - alpha/2)
+    z_a2_i = norm.ppf(alpha/2) # 0.25 -> valor negatiu
+    z_a2_s = norm.ppf(1 - alpha/2) # 0.975 -> valor positiu
 
-    print(z_a2, min_z_a2)
+    print(z_a2_s, z_a2_i)
 
-    assert np.isclose(z_a2, -min_z_a2, atol=1e-12), \
-           f"Values differ: {z_a2} vs {-min_z_a2}"
-    return (z_a2,)
+    assert np.isclose(z_a2_i, -z_a2_s, atol=1e-12), \
+           f"Values differ: {z_a2_i} vs {z_a2_s}"
+    return z_a2_i, z_a2_s
 
 
 @app.cell
-def _(norm, plot_normal_pdf, plt, setup_ax, shade_rejection_region, z_a2):
+def _(norm, plot_normal_pdf, plt, setup_ax, shade_rejection_region, z_a2_i):
     mu_z, sigma_z = 0, 1
-    C_i_z, C_s_z = z_a2, -z_a2 
+    C_i_z, C_s_z = z_a2_i, -z_a2_i
     x_range_z = [-4, 4]
 
     fig_z, ax_z = plt.subplots()
@@ -297,7 +297,7 @@ def _(mo):
 
 
 @app.cell
-def _(norm, np, plt, z_a2):
+def _(norm, np, plt, z_a2_i, z_a2_s):
     def plot_normal_cdf_with_shade(ax, mu, sigma, x_value, x_range, color):
         """
         Plots the normal CDF and shades the area from -inf to x_value on a given axis.
@@ -309,25 +309,25 @@ def _(norm, np, plt, z_a2):
         y_cdf = norm.cdf(x, mu, sigma)
         # 3. Plot the CDF line
         ax.plot(x, y_cdf, 'blue', label='Standard Normal CDF')
-    
+
         # 4. Define the x range for the shaded area
         x_shade = np.linspace(x_range[0], x_value, 100)
         # 5. Calculate the CDF values for the shaded area
         y_shade = norm.cdf(x_shade, mu, sigma)
-    
+
         # Get the probability at x_value
         p_value = norm.cdf(x_value, mu, sigma)
-    
+
         # 6. Fill the area
         ax.fill_between(x_shade, 0, y_shade, color=color, alpha=0.7, label=f'Area = {p_value:.3f}')
-    
+
         # 7. Add a vertical line at the x_value
         ax.vlines(x_value, 0, p_value, color='red', linestyle='--', label=f'z = {x_value:.3f}')
-    
+
         # 8. Set limits (other formatting will be done outside)
         ax.set_xlim(x_range)
         ax.set_ylim(0, 1.05)
-    
+
         return p_value
 
     def format_cdf_plot(ax, z_value, p_value, z_label, p_label, title):
@@ -341,7 +341,7 @@ def _(norm, np, plt, z_a2):
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-    
+
         # --- Personalització de les etiquetes dels eixos ---
         # Afegim els nostres valors als eixos
         ax.set_xticks(list(ax.get_xticks()) + [z_value])
@@ -391,16 +391,16 @@ def _(norm, np, plt, z_a2):
         ax1, 
         mu_cdf, 
         sigma_cdf, 
-        x_value=z_a2, 
+        x_value=z_a2_i, 
         x_range=x_range_cdf,
         color='purple'
     )
     # Aplica el format personalitzat
     format_cdf_plot(
         ax1, 
-        z_a2, 
+        z_a2_i, 
         p_value_lower, 
-        z_label=f'$z_{{\\alpha/2}} \\approx {z_a2:.2f}$', 
+        z_label=f'$z_{{\\alpha/2}} \\approx {z_a2_i:.2f}$', 
         p_label=f'$\\alpha/2 = {p_value_lower:.3f}$',
         title="Funció de Distribució (CDF) per a $\\alpha/2$"
     )
@@ -410,7 +410,7 @@ def _(norm, np, plt, z_a2):
         ax2, 
         mu_cdf, 
         sigma_cdf, 
-        x_value=z_1_minus_a2, 
+        x_value=z_a2_s, 
         x_range=x_range_cdf,
         color='orange' # Un color diferent
     )
@@ -438,11 +438,11 @@ def _(mo):
     Ara que hem vist que el valor que ens queda dins la probabilitat és el valor que estem cercant $z_{\alpha/2}$ i representa el que volem, podem trobar el valor de les cotes superiors i inferirors $C_s$ i $C_i$ de la següent manera:
 
     $$
-    Z = \frac{\sqrt{n}(\bar{X}_n - \mu_0)}{\sigma} \le z_{\alpha/2} \Rightarrow \bar{X}_n \le \mu_0 + z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_s
+    Z = \frac{\sqrt{n}(\bar{X}_n - \mu_0)}{\sigma} \ge z_{1 - \alpha/2} \Rightarrow \bar{X}_n \ge \mu_0 + z_{1 - \alpha/2}\frac{\sigma}{\sqrt{n}} = \mu_0 - z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_s
     $$
 
     $$
-    Z = \frac{\sqrt{n}(\bar{X}_n - \mu_0)}{\sigma} \le -z_{\alpha/2} \Rightarrow \bar{X}_n \ge \mu_0 - z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_i
+    Z = \frac{\sqrt{n}(\bar{X}_n - \mu_0)}{\sigma} \le z_{\alpha/2} \Rightarrow \bar{X}_n \le \mu_0 + z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_i
     $$
 
     L'interval ($C_i$, $C_s$) de trobar l'interval que ens defineix el contrari de la regió crítica, la regió d'acceptació! Aquesta és la decisió directa sobre l'elecció d'$\alpha$.
@@ -559,7 +559,7 @@ def _(mo):
 def _(beta, norm):
     z_beta = norm.ppf(beta)
     z_beta
-    return (z_beta,)
+    return
 
 
 @app.cell
@@ -567,13 +567,13 @@ def _(mo):
     mo.md(
         r"""
     Ara, recapitulem. Hem aconseguit expressar $C_s$ de dues maneres diferents.
-    + Sota $H_0$: $\bar{X}_n \le \mu_0 + z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_s$
+    + Sota $H_0$: $\bar{X}_n \le \mu_0 - z_{\alpha/2}\frac{\sigma}{\sqrt{n}} = C_s$
     + Sota $H_1$: $C_s = \mu_1 + z_\beta \frac{\sigma}{\sqrt{n}} \ge \bar{X}_n$
 
     I per tant, podem igualar respecte la cota $C_s$ i aïllem $n$
 
     $$
-    n = \frac{\sigma^2 (z_{\alpha/2} - z_{1-\beta})^2}{(\mu_1 - \mu_0)^2} = \frac{\sigma^2 (z_{\alpha/2} + z_{1-\beta})^2}{d^2} 
+    n = \frac{\sigma^2 (z_{\alpha/2} + z_{\beta})^2}{(\mu_1 - \mu_0)^2} = \frac{\sigma^2 (z_{\alpha/2} - z_{1-\beta})^2}{d^2} 
     $$
 
     On recordem que $d$ era el tamany de l'effecte. Aquesta fòrmula és fantàstica, perque relaciona totes les quantitats que s'han hagut d'escollit a priori pel test. A més a més, també relaciona el "poder del test" $1-\beta$ en comptes de amb l'error tipus II usant que $z_\beta = - z_{1-\beta}$. Anem-la a calcular pel nostre cas.
@@ -585,23 +585,26 @@ def _(mo):
 
 
 @app.cell
-def _(z_a2, z_beta):
+def _(alpha, beta, norm):
     import math
 
-    mu_0 = 0
-    d = (mu_0-2)**2
-    sigma = 5 
-    n = (sigma*(z_a2 - z_beta)**2)/d
+    z_a2 = norm.ppf(alpha/2)
+    z_b = norm.ppf(beta)
+
+    mu_0, sigma = 0, 5
+
+    d = (mu_0-2)
+    n = (sigma**2)*(z_a2 + z_b)**2/d**2
     n_sample = math.ceil(n)
     print(f"Valor d'n és {n}, tamany mostral ha de ser de {n_sample}")
-    return math, mu_0, n, n_sample, sigma
+    return math, mu_0, n, n_sample, sigma, z_a2
 
 
 @app.cell
 def _(math, mo, n):
     mo.md(
         rf"""
-    Per tant, només amb només {math.ceil(n)} mostres serem capaços de garantir resultats amb els paràmetres demanats.
+    Per tant, amb {math.ceil(n)} mostres serem capaços de garantir resultats amb els paràmetres demanats.
 
     ## 7. Valors crítics
 
@@ -615,17 +618,12 @@ def _(math, mo, n):
 def _(mu_0, n, sigma, z_a2):
     from math import sqrt, ceil
 
-    C_s = mu_0 + z_a2*sigma/sqrt(ceil(n))
-    C_i = mu_0 - z_a2*sigma/sqrt(ceil(n))
+    C_s = mu_0 - z_a2*sigma/sqrt(ceil(n))
+    C_i = mu_0 + z_a2*sigma/sqrt(ceil(n))
 
-    print(f"C_i = {C_i}\nC_s = {C_s}")
+    print(f"[{C_i},{C_s}]")
     C_i, C_s
     return C_s, sqrt
-
-
-@app.cell
-def _():
-    return
 
 
 @app.cell
@@ -634,21 +632,32 @@ def _(mo):
         r"""
     Ja hem acabat tots els passos __a priori__ del test d'hipòtesi neyman-pearson. A la vida real ara es faria l'experiment, es recolliriren les mostres i un cop tractades es pot entrar a avaluar les hipòtesis.
 
-    A la següent casella es genera una mostra que hauria de rebutjar la hipòtesi nul·la
+    A la següent casella es genera una mostra que hauria de rebutjar la hipòtesi nul·la.
+
+    Per a adaptar-nos al requeriment absurd del Z-test de saber $\sigma$, tenim en compte que 
+
+    $$
+    \mathbb{V}(X - Y) = \mathbb{V}(X) + \mathbb{V}(Y) = 25 \Leftrightarrow 5 = \mathbb{V}(X - Y) = 12.5 + 12.5
+    $$
+
+    Generarem cada vector amb $\sigma = 12.5$
     """
     )
     return
 
 
 @app.cell
-def _(n_sample, norm, np, sigma):
+def _(n_sample, norm, np, sqrt):
     # generem una mostra per fer l'experiment. Generem dues distribucions normals amb la mateixa sigma = 5 i les restem.
     mu_0s, mu_1s = 6, 3.5
-    abans = np.array([norm.rvs(loc=mu_0s, scale=sigma) for _ in range(n_sample)])
-    despres = np.array([norm.rvs(loc=mu_1s, scale=sigma) for _ in range(n_sample)])
+    msigma = 12.5
+    abans = np.array([norm.rvs(loc=mu_0s, scale=sqrt(msigma)) for _ in range(n_sample)])
+    despres = np.array([norm.rvs(loc=mu_1s, scale=sqrt(msigma)) for _ in range(n_sample)])
 
     X = despres - abans
-    return X, mu_0s
+
+    print(X.var())
+    return (X,)
 
 
 @app.cell
@@ -664,9 +673,10 @@ def _(mo):
 
 
 @app.cell
-def _(X, mu_0s, n_sample, sigma, sqrt):
+def _(X, mu_0, n_sample, sigma, sqrt):
+    print(f"mu_0: {mu_0}")
     X_avg = X.mean()
-    Z = sqrt(n_sample)*(X_avg - mu_0s) / sigma
+    Z = sqrt(n_sample)*(X_avg - mu_0) / sigma
     print(f"Mitjana mostral: {X_avg}. Valor de l'estadístic: {Z}")
     return X_avg, Z
 
@@ -677,15 +687,15 @@ def _(mo):
         r"""
     ## 9. Resultat
 
-    El Z-test rebutja $H_0$ si $|Z| > z_{\alpha/2}$. Comprovem-ho
+    El Z-test rebutja $H_0$ si $|Z| > z_{1 - \alpha/2}$. Comprovem-ho
     """
     )
     return
 
 
 @app.cell
-def _(Z, math, z_a2):
-    math.fabs(Z) > z_a2
+def _(Z, math, z_a2_s):
+    math.fabs(Z) > z_a2_s
     return
 
 
@@ -705,11 +715,6 @@ def _(C_s, X_avg, math):
 @app.cell
 def _(mo):
     mo.md(r"""Per acabar-ho d'entendre, podriem dibuixar la $H_0$ nul·la altre vegada, amb els valors de C i de la mitjana mostral, juntament amb la normal estandaritzada i els valor de l'estadístic.""")
-    return
-
-
-@app.cell
-def _():
     return
 
 
