@@ -107,7 +107,7 @@ def _():
 
     n_perm = comb(N=24, k=8, exact=True)*comb(N=16, k=8, exact=True)
     print(f"Hi ha {n_perm} ({n_perm:.2e}) permutacions possibles")
-    return
+    return (n_perm,)
 
 
 @app.cell
@@ -170,6 +170,12 @@ def _(f_sample, f_statistics, n_resamples):
     extreme_observations = (sum((f_sample <= f_statistic for f_statistic in f_statistics)) + 1)
     pvalue = extreme_observations / (n_resamples +1)
     print(f"El p-valor és de {pvalue:.3e}. Hi ha {extreme_observations} observacions sobre F mostral")
+    return
+
+
+@app.cell
+def _(C):
+    del C
     return
 
 
@@ -260,131 +266,171 @@ def _(df1):
         )
         .sort("Subjecte")
     )
+    df2 = df2.to_pandas()
     df2
     return (df2,)
 
 
 @app.cell
-def _(df2, np, ols, pl, sm):
+def _(mo):
+    mo.md(r"""Un cop amb les dades, creem un model lineal que relacioni Valoracio amb Tast i Grup amb les dades actuals i en calculem l'$F$ estadístic.""")
+    return
 
-    print("--- Original Polars Data ---")
-    print(df2.head(6)) # Show first two subjects
 
-    # --- 2. Step 1: Calculate the Observed Statistic (f.obs) ---
-    # statsmodels's formula API works best with pandas DataFrames.
-    # We convert the polars DataFrame to pandas just for this calculation.
-    df_pd_obs = df2.to_pandas()
+@app.cell
+def _(df2):
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    from time import time
 
-    model_obs = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df_pd_obs).fit()
-    anova_table_obs = sm.stats.anova_lm(model_obs, type=2)
+    def f_statistic_sample(df2):
+        model_obs = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df2).fit()
+        anova_table_obs = sm.stats.anova_lm(model_obs, type=2)
 
-    # Extract the F-value
-    f_obs = anova_table_obs.loc['C(Tast)', 'F']
+        return anova_table_obs
 
-    print("\n--- Observed ANOVA ---")
+    t1 = time()
+    anova_table_obs = f_statistic_sample(df2)
+    t2 = time()
+
     print(anova_table_obs)
-    print(f"\nObserved F-statistic (f.obs): {f_obs:.4f}")
+    f_obs = anova_table_obs.loc['C(Tast)', 'F']
+    print(f"\nF-estatistic mostral (f.obs): {f_obs:.4f} in {t2-t1}")
+    return f_obs, ols, sm, time
 
 
-    # --- 3. Step 2: The Monte Carlo Permutation Loop ---
-    # We use Polars' superior performance for the shuffling step.
+@app.cell
+def _(df2, sm, time):
+    from sklearn.preprocessing import OneHotEncoder
 
-    n_perms = 9999  # Number of permutations
-    f_permutations = [] # List to store the F-stats
+    def f_statistic_sample_manual(df): 
+        y_obs = df['Valoracio'].to_numpy()
+        subjects = df[['Subjecte']].to_numpy()  # Needs to be 2D for the encoder
+        tast_and_subj = df[['Subjecte', 'Tast']].to_numpy()
 
-    print(f"\n--- Running {n_perms} Permutations (using Polars)... ---")
+        # Reduced Model (X_reduced): Valoracio ~ Subjecte
+        encoder_subj = OneHotEncoder(drop='first', sparse_output=False)
+        X_subj_dummies = encoder_subj.fit_transform(subjects)
+        X_reduced = sm.add_constant(X_subj_dummies, prepend=True) # Adds the intercept
 
-    for _ in range(n_perms):
+        # Full Model (X_full): Valoracio ~ Subjecte + Tast
+        encoder_full = OneHotEncoder(drop='first', sparse_output=False)
+        X_full_dummies = encoder_full.fit_transform(tast_and_subj)
+        X_full = sm.add_constant(X_full_dummies, prepend=True) # Adds the intercept
 
-        # --- THIS IS THE KEY POLARS PERMUTATION STEP ---
-        # We create a new permuted DataFrame.
-        # .shuffle() shuffles the column.
-        # .over('Subjecte') specifies that the shuffling should happen *within* each group.
+        df_diff = X_full.shape[1] - X_reduced.shape[1]  # DFs for the 'Tast' factor (2)
+        df_full = len(y_obs) - X_full.shape[1]         # Residual DFs for the full model (14)
 
-        df_perm_pl = df2.with_columns(
-            pl.col('Valoracio').shuffle().over('Subjecte')
+        # Fit both models on the original, un-shuffled data
+        model_reduced_obs = sm.OLS(y_obs, X_reduced).fit()
+        model_full_obs = sm.OLS(y_obs, X_full).fit()
+
+        # Get the Residual Sum of Squares (RSS) for each
+        rss_r_obs = model_reduced_obs.ssr
+        rss_f_obs = model_full_obs.ssr
+
+        # Manually calculate the F-statistic
+        f_obs = ((rss_r_obs - rss_f_obs) / df_diff) / (rss_f_obs / df_full)
+        return f_obs
+
+    t_s = time()
+    f_obs_manual = f_statistic_sample_manual(df2)
+    t_e = time()
+
+    print(f"Observed F-statistic (f.obs): {f_obs_manual:.4f} in {t_e-t_s:.4f}")
+    return (OneHotEncoder,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""Permutem per a fer montecarlo: ens guardem els $F$-estadístics d'un subconjunt de premutacions informatives per a fer la distribució de l'estadístic sota la hipòtesi nu""")
+    return
+
+
+@app.cell
+def _(OneHotEncoder, df2, f_obs, n_perm, n_resamples, np, sm, time):
+    f_permutations = [] # Pre-allocate a numpy array for speed
+    subjects = df2[['Subjecte']].to_numpy()  # Needs to be 2D for the encoder
+    tast_and_subj = df2[['Subjecte', 'Tast']].to_numpy()
+    # Get subject groups for efficient shuffling
+    subject_groups = df2['Subjecte'].to_numpy()
+    original_indices = np.arange(len(df2))
+    y_obs = df2['Valoracio'].to_numpy()
+    encoder_subj = OneHotEncoder(drop='first', sparse_output=False)
+    X_subj_dummies = encoder_subj.fit_transform(subjects)
+    X_reduced = sm.add_constant(X_subj_dummies, prepend=True) # Adds the intercept_
+
+    encoder_full = OneHotEncoder(drop='first', sparse_output=False)
+    X_full_dummies = encoder_full.fit_transform(tast_and_subj)
+    X_full = sm.add_constant(X_full_dummies, prepend=True) # Adds the intercept
+
+    # --- Calculate degrees of freedom (these are constant) ---
+    df_diff = X_full.shape[1] - X_reduced.shape[1]  # DFs for the 'Tast' factor (2)
+    df_full = len(y_obs) - X_full.shape[1]         # Residual DFs for the full model (14)
+
+    print(f"\nRunning {n_resamples} permutations...")
+    start_time = time()
+
+    for i in range(n_resamples):
+        # Permute the 'Valoracio' values by shuffling indices within each subject group
+        permuted_indices = np.concatenate(
+            [np.random.permutation(original_indices[subject_groups == g]) 
+             for g in np.unique(subject_groups)]
         )
-
-        # --- Calculate the F-stat for this *permuted* data ---
-        # Again, we must convert to pandas for statsmodels
-        df_perm_pd = df_perm_pl.to_pandas()
-
-        model_perm = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df_perm_pd).fit()
-        anova_table_perm = sm.stats.anova_lm(model_perm, type=2)
-        f_p = anova_table_perm.loc['C(Tast)', 'F']
-
-        # Store the result
+        y_perm = y_obs[permuted_indices]
+    
+        # Fit the two models using the permuted y and pre-built matrices
+        # This is now just fast numpy math, no slow formula parsing
+        rss_r_perm = sm.OLS(y_perm, X_reduced).fit().ssr
+        rss_f_perm = sm.OLS(y_perm, X_full).fit().ssr
+    
+        # Calculate F-stat for this permutation
+        f_p = ((rss_r_perm - rss_f_perm) / df_diff) / (rss_f_perm / df_full)
         f_permutations.append(f_p)
 
-    print("Done.")
+    end_time = time()
+    print(f"Done. Loop took {end_time - start_time:.2f} seconds.")
 
-    # --- 4. Step 3: Calculate the p-value ---
-    # This part is identical to the pandas version.
 
-    f_permutations = np.array(f_permutations)
+    # --- 4. Calculate Final p-value ---
     n_greater = np.sum(f_permutations >= f_obs)
-
-    p_value = (n_greater + 1) / (n_perms + 1)
+    p_value = (n_greater + 1) / (n_perm + 1)
 
     print("\n--- Results ---")
-    print(f"Observed F-statistic: {f_obs:.4f}")
-    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perms}")
+    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perm}")
     print(f"Monte Carlo p-value: {p_value:.4f}")
     return
 
 
 @app.cell
-def _(df1, n_resamples, np, stats):
-    from itertools import product, permutations
+def _(df2, n_resamples, np, ols, pl, sm):
+    def permute_and_fit(df: pl.DataFrame):
+        df_perm_pd = df.copy()
 
-    combinations_per_individual = np.array([[*permutations(row)] for row in df1.iter_rows()])
-    all_combinations_iterator = np.array(list(product(*combinations_per_individual)))
-    all_combinations_colums = np.array([array.reshape(array.shape[1], array.shape[0]) for array in all_combinations_iterator])
+        df_perm_pd['Valoracio'] = df_perm_pd.groupby('Subjecte')['Valoracio'] \
+                                          .transform(np.random.permutation)
 
-    sample_idx = np.random.choice([i for i in range(len(all_combinations_colums))], size=n_resamples)
+        model_perm = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df_perm_pd).fit()
+        anova_table_perm = sm.stats.anova_lm(model_perm, type=2)
+        return anova_table_perm.loc['C(Tast)', 'F']
 
-    f_statistics_mc = [
-        stats.f_oneway(A, B, C).statistic
-        for (A, B, C) in all_combinations_colums[sample_idx] 
+    f_perm_comp = [
+        permute_and_fit(df2) for _ in range(n_resamples)    
     ]
-
-    print(len(f_statistics_mc))
-    return (f_statistics_mc,)
-
-
-@app.cell
-def _(f_sample, f_statistics_mc, plt):
-    plt.figure()
-    plt.hist(f_statistics_mc, bins=30)
-    plt.axvline(x=f_sample)
-    plt.show()
+    f_perm_comp
     return
 
 
 @app.cell
 def _():
-    return
+    """f_permutations = np.array(f_permutations)
+    n_greater = np.sum(f_permutations >= f_obs)
 
+    p_value = (n_greater + 1) / (n_perms + 1)
 
-@app.cell
-def _(f_sample, f_statistics_mc, n_resamples):
-    extreme_observations_2 = (sum((f_sample <= f_statistic for f_statistic in f_statistics_mc)) + 1)
-    pvalue_2 = extreme_observations_2 / (n_resamples +1)
-    print(f"El p-valor és de {pvalue_2:.3e}. Hi ha {extreme_observations_2} observacions sobre F mostral")
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 5. Conclusió
-
-    El valor del $p$-valor és de 0.34. Aquest valor es pot considerar significatiu amb una magnitud considerable, per tant ens dona motius per anar en contra de la $H_0$ i que l'esdeveniment no sigui a causa d'una fluctuaicó aleatòria.
-
-    És veritat que el $p$ valor actual és més gran que no pas el del cas d'estudi 1. En aquell cas, estem molt més segurs sobre que no és cosa aleatòria, sinó que és un valor poc probable sota la hipòtesi nul·la, ja que la magnitud és important.
-    """
-    )
+    print(f"Observed F-statistic: {f_obs:.4f}")
+    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perms}")
+    print(f"Monte Carlo p-value: {p_value:.4f}")"""
     return
 
 
