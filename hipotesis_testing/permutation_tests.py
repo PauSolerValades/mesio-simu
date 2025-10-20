@@ -23,8 +23,6 @@ def _(mo):
     Tenim tres grups de persones, A, B, i C. Cada grup ha fet un tast de vi amb el mateix vi, però amb circumstàncies diferents. El grup A ha estat un tast prèmium, el grup B ha estat un tast normal i el C un tast deixat.
 
     L'objectiu del test d'hipòtesi seria veure si l'entorn ha tingut algun tipus d'influència sobre la percepció del vi dels participants de l'estudi.
-
-    Farem el mateix experiment dues vegades, seguint la filosofia de Fisher i la de Neyman-Pearson.
     """
     )
     return
@@ -55,7 +53,7 @@ def _(mo):
 
     El test d'hipòtesi ens intentarà rebutjar o no rebutjar aquesta hipòtesi.
 
-    NOTA: el test de permutacions NO admet una hipòtesi alternativa (és a dir, és de l'escola de Fisher) ja que és impossible permutar la hipòtesi alternativa per a obtenir el llindar. PREGUNTAR: fer servir $\alpha$ i $H_1$ aquí seria INCORRECTE.
+    NOTA: el test de permutacions NO admet una hipòtesi alternativa (és a dir, és de l'escola de Fisher) ja que és impossible permutar la hipòtesi alternativa per a obtenir el llindar. PREGUNTAR: fer servir $\alpha$ i $H_1$ aquí seria INCORRECTE
 
     ## 3. Càlcul del $p$-valor
 
@@ -203,7 +201,12 @@ def _(mo):
 
     ## 1. Test
 
-    Seguirem utilitzant un ANOVA entre els tres grups.
+    Seguirem utilitzant un ANOVA entre els tres grups, però la metodologia de l'experiment seguirà el mètode de [Randomized Block Design](https://en.wikipedia.org/wiki/Generalized_randomized_block_design). S'utilitzen per mirar la interacció entre [blocs](https://en.wikipedia.org/wiki/Blocking_(statistics)) (agrupaments de dades similars en una o diverses caractererístiques) contra tractaments. Cada tractament es replica com a mínim dues vegades per bloc, permetent l'estimació dels termes d'interacció d'un _model lineal_. La idea enginyosa és que els blocs s'agrupen amb la _variable de no interès_ (nuisance parameter), és a dir, la que creiem que no explicarà la varianca de la relació i és la qual haurem de permutar per comprovar si les altres dues tenen realment relació.
+
+    Hem de definir per tant els blocs, els termes interactius i el model lineal:
+    + Objectiu: quina relació volem modelitzar? la relació entre la variable `tast` i la variable `valoració`.
+    + Blocs: La variable de no interès son els `subjecte`, perque cadascun ha participat en els tres grups, i la relació real està en els grups, no amb quin individu ha donat la valoració. Per tant, els blocks seran `(valoracio_A_i, valoracio_B_i, valoracio_B_i)` on `i=1..8` nombre de subjectes diferents.
+    + Randomització: dins de cada bloc randomitzem les valoracions (això és el $3!$ que s'ha mencionat abans al text.) 
 
     ## 2. Hipòtesi Nul·la
 
@@ -234,65 +237,110 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""El nombre és adequat per un test de MonteCarlo, però és prou petit com per fer un test exacte si ho preferissim.""")
+    mo.md(
+        r"""
+    El nombre és adequat per un test de MonteCarlo, tot i que un exacte (si tens 15 minuts) també és possible d'utilitzar. Per a fer el codi lleugerament més llegible i eficient, primer he generat totes les possibles iteracions mitjançant un generador de python a `all_combinations_iterator`, i d'allà n'extrec una mostra per a fer montecarlo.
+
+    Per a calcular, primer convertim el dataset de tres columnes A, B i C en un dataset per facilitat.
+    """
+    )
     return
 
 
 @app.cell
-def _(df1, np):
-    from itertools import permutations, product
+def _(df1):
+    df2 = (
+        df1 
+        .with_row_index(name="Subjecte", offset=1) # Adds index col 'Subjecte' starting at 1
+        .unpivot(
+            index="Subjecte", 
+            on=["A", "B", "C"],
+            variable_name="Tast", 
+            value_name="Valoracio"
+        )
+        .sort("Subjecte")
+    )
+    df2
+    return (df2,)
+
+
+@app.cell
+def _(df2, np, ols, pl, sm):
+
+    print("--- Original Polars Data ---")
+    print(df2.head(6)) # Show first two subjects
+
+    # --- 2. Step 1: Calculate the Observed Statistic (f.obs) ---
+    # statsmodels's formula API works best with pandas DataFrames.
+    # We convert the polars DataFrame to pandas just for this calculation.
+    df_pd_obs = df2.to_pandas()
+
+    model_obs = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df_pd_obs).fit()
+    anova_table_obs = sm.stats.anova_lm(model_obs, type=2)
+
+    # Extract the F-value
+    f_obs = anova_table_obs.loc['C(Tast)', 'F']
+
+    print("\n--- Observed ANOVA ---")
+    print(anova_table_obs)
+    print(f"\nObserved F-statistic (f.obs): {f_obs:.4f}")
+
+
+    # --- 3. Step 2: The Monte Carlo Permutation Loop ---
+    # We use Polars' superior performance for the shuffling step.
+
+    n_perms = 9999  # Number of permutations
+    f_permutations = [] # List to store the F-stats
+
+    print(f"\n--- Running {n_perms} Permutations (using Polars)... ---")
+
+    for _ in range(n_perms):
+
+        # --- THIS IS THE KEY POLARS PERMUTATION STEP ---
+        # We create a new permuted DataFrame.
+        # .shuffle() shuffles the column.
+        # .over('Subjecte') specifies that the shuffling should happen *within* each group.
+
+        df_perm_pl = df2.with_columns(
+            pl.col('Valoracio').shuffle().over('Subjecte')
+        )
+
+        # --- Calculate the F-stat for this *permuted* data ---
+        # Again, we must convert to pandas for statsmodels
+        df_perm_pd = df_perm_pl.to_pandas()
+
+        model_perm = ols('Valoracio ~ C(Subjecte) + C(Tast)', data=df_perm_pd).fit()
+        anova_table_perm = sm.stats.anova_lm(model_perm, type=2)
+        f_p = anova_table_perm.loc['C(Tast)', 'F']
+
+        # Store the result
+        f_permutations.append(f_p)
+
+    print("Done.")
+
+    # --- 4. Step 3: Calculate the p-value ---
+    # This part is identical to the pandas version.
+
+    f_permutations = np.array(f_permutations)
+    n_greater = np.sum(f_permutations >= f_obs)
+
+    p_value = (n_greater + 1) / (n_perms + 1)
+
+    print("\n--- Results ---")
+    print(f"Observed F-statistic: {f_obs:.4f}")
+    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perms}")
+    print(f"Monte Carlo p-value: {p_value:.4f}")
+    return
+
+
+@app.cell
+def _(df1, n_resamples, np, stats):
+    from itertools import product, permutations
 
     combinations_per_individual = np.array([[*permutations(row)] for row in df1.iter_rows()])
-
-    # funció que implementa el producte cartesià recursiu
-    def get_all_combinations_recursive(list_of_lists):
-        # Base Case: If there's only one list left, return its items.
-        # Each item needs to be wrapped in a list so it can be combined later.
-        if len(list_of_lists) == 1:
-            return [[item] for item in list_of_lists[0]]
-
-        # Recursive Step
-        # 1. Get all combinations from the REST of the lists.
-        combinations_from_rest = get_all_combinations_recursive(list_of_lists[1:])
-
-        # 2. Get the choices from the CURRENT list.
-        current_choices = list_of_lists[0]
-
-        all_combinations = []
-        for choice in current_choices:
-            for combo in combinations_from_rest:
-                all_combinations.append([choice] + combo)
-
-        return all_combinations
-
-    #all_combinations = get_all_combinations_recursive(combinations_per_individual)
-    # fent servir l'unpakcing operator tot va finíssim
     all_combinations_iterator = np.array(list(product(*combinations_per_individual)))
-    print(len(all_combinations_iterator))
-    return (all_combinations_iterator,)
-
-
-@app.cell
-def _(all_combinations_iterator, np, stats):
     all_combinations_colums = np.array([array.reshape(array.shape[1], array.shape[0]) for array in all_combinations_iterator])
 
-    f_statistics_exact = [
-        stats.f_oneway(A, B, C).statistic
-        for A, B, C in all_combinations_colums
-    ]
-
-    print(len(f_statistics_exact))
-    return (all_combinations_colums,)
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""Per a fer-ho amb Monte-Carlo, al ja haver calculat totes les permutacions possibles, només hem d'agafar una mostra de `n_sample` aleatòriament.""")
-    return
-
-
-@app.cell
-def _(all_combinations_colums, n_resamples, np, stats):
     sample_idx = np.random.choice([i for i in range(len(all_combinations_colums))], size=n_resamples)
 
     f_statistics_mc = [
@@ -314,6 +362,11 @@ def _(f_sample, f_statistics_mc, plt):
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(f_sample, f_statistics_mc, n_resamples):
     extreme_observations_2 = (sum((f_sample <= f_statistic for f_statistic in f_statistics_mc)) + 1)
     pvalue_2 = extreme_observations_2 / (n_resamples +1)
@@ -330,18 +383,8 @@ def _(mo):
     El valor del $p$-valor és de 0.34. Aquest valor es pot considerar significatiu amb una magnitud considerable, per tant ens dona motius per anar en contra de la $H_0$ i que l'esdeveniment no sigui a causa d'una fluctuaicó aleatòria.
 
     És veritat que el $p$ valor actual és més gran que no pas el del cas d'estudi 1. En aquell cas, estem molt més segurs sobre que no és cosa aleatòria, sinó que és un valor poc probable sota la hipòtesi nul·la, ja que la magnitud és important.
-
-    # Cas d'estudi 3: Aspirina i Sagnrat
     """
     )
-    return
-
-
-@app.cell
-def _(pl):
-    df3= pl.read_csv("casestudy3.csv")
-
-    df3
     return
 
 
