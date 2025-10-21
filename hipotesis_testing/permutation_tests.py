@@ -9,6 +9,7 @@ def _():
     import marimo as mo
     import scipy.stats as stats
     import polars as pl
+    import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
     return mo, np, pl, plt, stats
@@ -53,8 +54,6 @@ def _(mo):
 
     El test d'hipòtesi ens intentarà rebutjar o no rebutjar aquesta hipòtesi.
 
-    NOTA: el test de permutacions NO admet una hipòtesi alternativa (és a dir, és de l'escola de Fisher) ja que és impossible permutar la hipòtesi alternativa per a obtenir el llindar. PREGUNTAR: fer servir $\alpha$ i $H_1$ aquí seria INCORRECTE
-
     ## 3. Càlcul del $p$-valor
 
     Per a fer-ho emprem un test de permutacions. Els passos dins del test de permutacions seran els següents:
@@ -73,13 +72,13 @@ def _(mo):
 
 @app.cell
 def _(df1, stats):
-    A = df1["A"].to_numpy()
-    B = df1["B"].to_numpy()
-    C = df1["C"].to_numpy()
+    Ag = df1["A"].to_numpy()
+    Bg = df1["B"].to_numpy()
+    Cg = df1["C"].to_numpy()
 
-    f_sample = stats.f_oneway(A, B, C).statistic
+    f_sample = stats.f_oneway(Ag, Bg, Cg).statistic
     print(f"L'estadístic F de la mostra és {f_sample}")
-    return A, B, C, f_sample
+    return Ag, Bg, Cg, f_sample
 
 
 @app.cell
@@ -107,7 +106,7 @@ def _():
 
     n_perm = comb(N=24, k=8, exact=True)*comb(N=16, k=8, exact=True)
     print(f"Hi ha {n_perm} ({n_perm:.2e}) permutacions possibles")
-    return (n_perm,)
+    return
 
 
 @app.cell
@@ -125,9 +124,9 @@ def _(mo):
 
 
 @app.cell
-def _(A, B, C, np, stats):
+def _(Ag, Bg, Cg, np, stats):
     n_resamples = 9999 
-    total_sample = np.concatenate((A, B, C))
+    total_sample = np.concatenate((Ag, Bg, Cg))
 
     perms = [np.random.permutation(total_sample) for _ in range(0,n_resamples)]
 
@@ -166,17 +165,15 @@ def _(mo):
 
 
 @app.cell
-def _(f_sample, f_statistics, n_resamples):
-    extreme_observations = (sum((f_sample <= f_statistic for f_statistic in f_statistics)) + 1)
-    pvalue = extreme_observations / (n_resamples +1)
+def _(f_sample, f_statistics):
+    def pvalue_mc(sample_statistic, mc_statistics):
+        extreme_observations = sum(sample_statistic <= s for s in mc_statistics)
+        pvalue = (extreme_observations + 1) / (len(mc_statistics) + 1)
+        return pvalue, extreme_observations
+
+    pvalue, extreme_observations = pvalue_mc(f_sample, f_statistics)
     print(f"El p-valor és de {pvalue:.3e}. Hi ha {extreme_observations} observacions sobre F mostral")
-    return
-
-
-@app.cell
-def _(C):
-    del C
-    return
+    return (pvalue_mc,)
 
 
 @app.cell
@@ -245,7 +242,7 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    El nombre és adequat per un test de MonteCarlo, tot i que un exacte (si tens 15 minuts) també és possible d'utilitzar. Per a fer el codi lleugerament més llegible i eficient, primer he generat totes les possibles iteracions mitjançant un generador de python a `all_combinations_iterator`, i d'allà n'extrec una mostra per a fer montecarlo.
+    El nombre és adequat per un test de MonteCarlo, tot i que un exacte (si tens mijta horeta...) també és possible d'utilitzar. Per a fer el codi lleugerament més llegible i eficient, primer he generat totes les possibles iteracions mitjançant un generador de python a `all_combinations_iterator`, i d'allà n'extrec una mostra per a fer montecarlo.
 
     Per a calcular, primer convertim el dataset de tres columnes A, B i C en un dataset per facilitat.
     """
@@ -266,6 +263,7 @@ def _(df1):
         )
         .sort("Subjecte")
     )
+    # el convertim a pandas per utilitzar-lo directament amb stats model
     df2 = df2.to_pandas()
     df2
     return (df2,)
@@ -296,49 +294,7 @@ def _(df2):
     print(anova_table_obs)
     f_obs = anova_table_obs.loc['C(Tast)', 'F']
     print(f"\nF-estatistic mostral (f.obs): {f_obs:.4f} in {t2-t1}")
-    return f_obs, ols, sm, time
-
-
-@app.cell
-def _(df2, sm, time):
-    from sklearn.preprocessing import OneHotEncoder
-
-    def f_statistic_sample_manual(df): 
-        y_obs = df['Valoracio'].to_numpy()
-        subjects = df[['Subjecte']].to_numpy()  # Needs to be 2D for the encoder
-        tast_and_subj = df[['Subjecte', 'Tast']].to_numpy()
-
-        # Reduced Model (X_reduced): Valoracio ~ Subjecte
-        encoder_subj = OneHotEncoder(drop='first', sparse_output=False)
-        X_subj_dummies = encoder_subj.fit_transform(subjects)
-        X_reduced = sm.add_constant(X_subj_dummies, prepend=True) # Adds the intercept
-
-        # Full Model (X_full): Valoracio ~ Subjecte + Tast
-        encoder_full = OneHotEncoder(drop='first', sparse_output=False)
-        X_full_dummies = encoder_full.fit_transform(tast_and_subj)
-        X_full = sm.add_constant(X_full_dummies, prepend=True) # Adds the intercept
-
-        df_diff = X_full.shape[1] - X_reduced.shape[1]  # DFs for the 'Tast' factor (2)
-        df_full = len(y_obs) - X_full.shape[1]         # Residual DFs for the full model (14)
-
-        # Fit both models on the original, un-shuffled data
-        model_reduced_obs = sm.OLS(y_obs, X_reduced).fit()
-        model_full_obs = sm.OLS(y_obs, X_full).fit()
-
-        # Get the Residual Sum of Squares (RSS) for each
-        rss_r_obs = model_reduced_obs.ssr
-        rss_f_obs = model_full_obs.ssr
-
-        # Manually calculate the F-statistic
-        f_obs = ((rss_r_obs - rss_f_obs) / df_diff) / (rss_f_obs / df_full)
-        return f_obs
-
-    t_s = time()
-    f_obs_manual = f_statistic_sample_manual(df2)
-    t_e = time()
-
-    print(f"Observed F-statistic (f.obs): {f_obs_manual:.4f} in {t_e-t_s:.4f}")
-    return (OneHotEncoder,)
+    return f_obs, ols, sm
 
 
 @app.cell
@@ -348,65 +304,13 @@ def _(mo):
 
 
 @app.cell
-def _(OneHotEncoder, df2, f_obs, n_perm, n_resamples, np, sm, time):
-    f_permutations = [] # Pre-allocate a numpy array for speed
-    subjects = df2[['Subjecte']].to_numpy()  # Needs to be 2D for the encoder
-    tast_and_subj = df2[['Subjecte', 'Tast']].to_numpy()
-    # Get subject groups for efficient shuffling
-    subject_groups = df2['Subjecte'].to_numpy()
-    original_indices = np.arange(len(df2))
-    y_obs = df2['Valoracio'].to_numpy()
-    encoder_subj = OneHotEncoder(drop='first', sparse_output=False)
-    X_subj_dummies = encoder_subj.fit_transform(subjects)
-    X_reduced = sm.add_constant(X_subj_dummies, prepend=True) # Adds the intercept_
-
-    encoder_full = OneHotEncoder(drop='first', sparse_output=False)
-    X_full_dummies = encoder_full.fit_transform(tast_and_subj)
-    X_full = sm.add_constant(X_full_dummies, prepend=True) # Adds the intercept
-
-    # --- Calculate degrees of freedom (these are constant) ---
-    df_diff = X_full.shape[1] - X_reduced.shape[1]  # DFs for the 'Tast' factor (2)
-    df_full = len(y_obs) - X_full.shape[1]         # Residual DFs for the full model (14)
-
-    print(f"\nRunning {n_resamples} permutations...")
-    start_time = time()
-
-    for i in range(n_resamples):
-        # Permute the 'Valoracio' values by shuffling indices within each subject group
-        permuted_indices = np.concatenate(
-            [np.random.permutation(original_indices[subject_groups == g]) 
-             for g in np.unique(subject_groups)]
-        )
-        y_perm = y_obs[permuted_indices]
-    
-        # Fit the two models using the permuted y and pre-built matrices
-        # This is now just fast numpy math, no slow formula parsing
-        rss_r_perm = sm.OLS(y_perm, X_reduced).fit().ssr
-        rss_f_perm = sm.OLS(y_perm, X_full).fit().ssr
-    
-        # Calculate F-stat for this permutation
-        f_p = ((rss_r_perm - rss_f_perm) / df_diff) / (rss_f_perm / df_full)
-        f_permutations.append(f_p)
-
-    end_time = time()
-    print(f"Done. Loop took {end_time - start_time:.2f} seconds.")
-
-
-    # --- 4. Calculate Final p-value ---
-    n_greater = np.sum(f_permutations >= f_obs)
-    p_value = (n_greater + 1) / (n_perm + 1)
-
-    print("\n--- Results ---")
-    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perm}")
-    print(f"Monte Carlo p-value: {p_value:.4f}")
-    return
-
-
-@app.cell
 def _(df2, n_resamples, np, ols, pl, sm):
+    # funció bastant ineficient però acaba en uns dos minuts!
+    # l'alternativa més eficient és usar OLS amb numpy i productes però s'enrreda molt ràpid
     def permute_and_fit(df: pl.DataFrame):
         df_perm_pd = df.copy()
 
+        # permuta aplicant una transformació per subjecte (group)
         df_perm_pd['Valoracio'] = df_perm_pd.groupby('Subjecte')['Valoracio'] \
                                           .transform(np.random.permutation)
 
@@ -414,23 +318,43 @@ def _(df2, n_resamples, np, ols, pl, sm):
         anova_table_perm = sm.stats.anova_lm(model_perm, type=2)
         return anova_table_perm.loc['C(Tast)', 'F']
 
-    f_perm_comp = [
-        permute_and_fit(df2) for _ in range(n_resamples)    
-    ]
-    f_perm_comp
+    f_perm_comp = [permute_and_fit(df2) for _ in range(n_resamples)]
+    len(f_perm_comp)
+    return (f_perm_comp,)
+
+
+@app.cell
+def _(f_obs, f_perm_comp, pvalue_mc):
+    p_value, ex_ob = pvalue_mc(f_obs, f_perm_comp)
+
+    print(f"El p-valor és de {p_value:.3e}. Hi ha {ex_ob} observacions sobre F mostral")
     return
 
 
 @app.cell
-def _():
-    """f_permutations = np.array(f_permutations)
-    n_greater = np.sum(f_permutations >= f_obs)
+def _(f_obs, f_perm_comp, plt):
+    plt.figure()
+    plt.hist(f_perm_comp, bins=30)
+    plt.axvline(x=f_obs, color='r') 
+    plt.show()
+    return
 
-    p_value = (n_greater + 1) / (n_perms + 1)
 
-    print(f"Observed F-statistic: {f_obs:.4f}")
-    print(f"Permuted F-stats >= observed: {n_greater} out of {n_perms}")
-    print(f"Monte Carlo p-value: {p_value:.4f}")"""
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    Com s'aprecia a la gràfica, clarament el p valor és significatiu. Concretament, NO hi ha cap permutació amb un estadístic per sobre l'estadístic mostral! Això també mostra la importancia d'afergir el +1 tan al numerador com al denominador, sinó sortiria un $p$-valor de zero.
+
+    ## 4. Significancia Estadística
+
+    El p-valor de $10^{-4}$ és absolutament significatiu.
+
+    ## 5. Conclusió
+
+    Es rebutja la hipòtesi nul·la ja que el p-valor és absolutament significant, i per tant, l'efecte de l'entorn ha infuit en la valoració del vi absolutament, molt més ara que s'han agrupat les persones en blocs que no només en el cas 1.
+    """
+    )
     return
 
 
