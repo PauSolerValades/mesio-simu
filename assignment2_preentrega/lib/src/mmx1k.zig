@@ -52,7 +52,9 @@ pub const SimConfig = struct {
 
 pub const SimResults = struct {
     duration: f64,
-    average_clients: f64,
+    mean_queue_length: f64,
+    mean_system_length: f64,
+    mean_service_time: f64,
     lost_passengers: u64,
     processed_events: u64,
     users_report: ArrayList(User), //recordaque l'array list és un fat pointer, quan retornes això només estas copiant un punter a items i capaciy
@@ -63,6 +65,7 @@ const User = struct {
     arrival: f64,
     leaving: ?f64 = null,
     wait_time: ?f64 = null,
+    service_time: ?f64 = null,
 };
 
 pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !SimResults {
@@ -76,10 +79,14 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
     var num_passengers_queue: u64 = 0;
     var current_bus_capacity: u64 = 0;
     var lost_passengers: u64 = 0;
+    var realized_bus_capacity: u64 = 0.0;
+    var total_service_time: f64 = 0.0;
 
-    var area_under_q: f64 = 0.0;
+    var area_queue: f64 = 0.0;
+    var area_system: f64 = 0.0;
     var last_event_time: f64 = 0.0;
     var event_id_counter: u64 = 0;
+    var served_users_count: u64 = 0;
 
     // primera arribada de passatjer per començar la simulació
     const t_p = try config.passenger_interarrival.sample(random);
@@ -103,8 +110,14 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
         t_clock = next_event.time;
         try traca.append(gpa, next_event);
 
-        // L_q = num_passengers_queue
-        area_under_q += @as(f64, @floatFromInt(num_passengers_queue)) * (t_clock - last_event_time);
+        const dt = t_clock - last_event_time;
+
+        area_queue += @as(f64, @floatFromInt(num_passengers_queue)) * dt;
+
+        const people_on_bus = realized_bus_capacity - current_bus_capacity;
+        const system_size = num_passengers_queue + people_on_bus;
+        area_system += @as(f64, @floatFromInt(system_size)) * dt;
+
         last_event_time = t_clock;
 
         switch (next_event.type) {
@@ -129,7 +142,8 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                 }
             },
             EventType.service => { // bus arrives
-                current_bus_capacity = try config.bus_capacity.sampleInt(random);
+                realized_bus_capacity = try config.bus_capacity.sampleInt(random);
+                current_bus_capacity = realized_bus_capacity;
 
                 event_id_counter += 1;
                 const time_bus = try config.bus_interarrival.sample(random);
@@ -164,14 +178,32 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                         const duration = try config.boarding_time.sample(random);
 
                         try hp.push(gpa, Event{ .time = t_clock + duration, .type = .boarding, .id = event_id_counter });
+                    } else { // Si la capacitat del bus és 0, aleshores marxa
+                        const passengers_on_bus = realized_bus_capacity - current_bus_capacity;
+
+                        const start_index: usize = first_user_in_queue - passengers_on_bus;
+                        for (start_index..first_user_in_queue) |i| {
+                            var processed_user: *User = &passangers_in_queue.items[i];
+                            const s_time = t_clock - processed_user.leaving.?;
+                            processed_user.service_time = s_time;
+
+                            total_service_time += s_time;
+                            served_users_count += 1;
+                        }
+                        realized_bus_capacity = 0;
+                        current_bus_capacity = 0;
                     }
                 }
             },
         }
     }
 
+    const mean_service = if (served_users_count > 0) total_service_time / @as(f64, @floatFromInt(served_users_count)) else 0.0;
+
     return SimResults{
-        .average_clients = area_under_q / t_clock,
+        .mean_queue_length = area_queue / t_clock,
+        .mean_system_length = area_system / t_clock,
+        .mean_service_time = mean_service, // Ws
         .duration = t_clock,
         .lost_passengers = lost_passengers,
         .processed_events = processed_events,
@@ -218,23 +250,23 @@ pub fn main() !void {
     var results = try eventSchedulingBus(gpa, rng, config);
     defer results.users_report.deinit(gpa);
     defer results.traca.deinit(gpa);
-
-    var acc: f64 = 0;
-    var counter: usize = 0;
+    var acc_wait: f64 = 0;
+    var counter_wait: usize = 0;
     for (results.users_report.items) |user| {
         if (user.wait_time) |wait_time| {
-            acc += wait_time;
-            counter += 1;
+            acc_wait += wait_time;
+            counter_wait += 1;
         }
     }
+    const mean_wait_time = if (counter_wait > 0) acc_wait / @as(f64, @floatFromInt(counter_wait)) else 0.0;
 
-    const mean_user_times = acc / @as(f64, @floatFromInt(counter));
-
-    try stdout.print("\nSIMULATION FINISH\n", .{});
     try stdout.print("\tDuration: \t\t{d:.4} \n", .{results.duration});
     try stdout.print("\tEvents processed: \t{d} \n", .{results.processed_events});
-    try stdout.print("\tAvg Queue (L): \t\t{d:.4}\n", .{results.average_clients});
     try stdout.print("\tLost passengers: \t{d}\n", .{results.lost_passengers});
-    try stdout.print("\tMean User Time in Queue: {d:.4}\n", .{mean_user_times});
+    try stdout.print("\tMean Queue Length (Lq):   {d:.4}\n", .{results.mean_queue_length});
+    try stdout.print("\tMean System Length (L):   {d:.4}\n", .{results.mean_system_length});
+    try stdout.print("\tMean Wait Time (Wq):      {d:.4}\n", .{mean_wait_time});
+    try stdout.print("\tMean Service Time (Ws):   {d:.4}\n", .{results.mean_service_time});
+
     try stdout.flush();
 }
