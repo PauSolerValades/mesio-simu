@@ -2,6 +2,8 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const Queue = std.PriorityQueue;
+//const Order = std.math.Order;
 const Random = std.Random;
 
 const heap = @import("structheap.zig");
@@ -62,11 +64,47 @@ pub const SimResults = struct {
 };
 
 const User = struct {
+    id: u64,
     arrival: f64,
-    leaving: ?f64 = null,
-    wait_time: ?f64 = null,
-    service_time: ?f64 = null,
+    about_to_board: ?f64 = null, // Estic apunt de pujar!
+    boarded: ?f64 = null, // He pujat i de fet estic assegut al bus (he tret l'Steam Deck per jugar, Sekiro en particular)!
+    departure: ?f64 = null, // Marxo amb els meus companys que me'ls estimo moltíssim!
+    queue_time: ?f64 = null, // Temps a la cua
+    service_time: ?f64 = null, // Ws: Temps des que començo a pujar i fins que el bus marxa
+    system_time: ?f64 = null, // W = Wq + Ws
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print(
+            \\User{{
+            \\  arrival: {d:.3},
+            \\  about_to_board: {?d:.3},
+            \\  boarded: {?d:.3},
+            \\  departure: {?d:.3},
+            \\  queue_time: {?d:.3},
+            \\  service_time: {?d:.3},
+            \\  system_time: {?d:.3}
+            \\}}
+        , .{
+            self.arrival,
+            self.about_to_board,
+            self.boarded,
+            self.departure,
+            self.queue_time,
+            self.service_time,
+            self.system_time,
+        });
+    }
 };
+
+//fn lessThanUser(context: void, a: User, b: User) Order {
+//    _ = context;
+//    return std.math.order(a.arrival, b.arrival);
+//}
+
+//const UserQueue = Queue(User, void, lessThanUser);
 
 pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !SimResults {
     var hp = heap.Heap(Event).init();
@@ -81,6 +119,7 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
     var lost_passengers: u64 = 0;
     var realized_bus_capacity: u64 = 0.0;
     var total_service_time: f64 = 0.0;
+    var boarding_active: bool = false;
 
     var area_queue: f64 = 0.0;
     var area_system: f64 = 0.0;
@@ -105,7 +144,9 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
     var passangers_in_queue: ArrayList(User) = .empty; // no es crida deinit perque la retornem a la strcut
     var first_user_in_queue: usize = 0;
 
-    while (t_clock <= config.horizon and hp.len() > 0) : (processed_events += 1) {
+    while (t_clock <= config.horizon and hp.len() > 0) : ({
+        processed_events += 1;
+    }) {
         const next_event = hp.pop().?; // we use ? because we are pretty sure that cannot fail
         t_clock = next_event.time;
         try traca.append(gpa, next_event);
@@ -117,8 +158,6 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
         const people_on_bus = realized_bus_capacity - current_bus_capacity;
         const system_size = num_passengers_queue + people_on_bus;
         area_system += @as(f64, @floatFromInt(system_size)) * dt;
-
-        last_event_time = t_clock;
 
         switch (next_event.type) {
             EventType.arrival => { // passanger arrives
@@ -138,13 +177,12 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                     lost_passengers += 1;
                 } else {
                     num_passengers_queue += 1; //len de passangers_in_queue
-                    try passangers_in_queue.append(gpa, User{ .arrival = t_clock });
+                    try passangers_in_queue.append(gpa, User{ .id = event_id_counter, .arrival = t_clock });
                 }
             },
             EventType.service => { // bus arrives
                 realized_bus_capacity = try config.bus_capacity.sampleInt(random);
                 current_bus_capacity = realized_bus_capacity;
-
                 event_id_counter += 1;
                 const time_bus = try config.bus_interarrival.sample(random);
                 const next_bus_time = t_clock + time_bus;
@@ -154,10 +192,10 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                 // Aquí hi ha un fix a preguntar:
                 // Si podem començar el boarding directament ho fem oi?
                 // (s'ha afegit el current_bus_capacity) en comptes de l'altre
-                if (num_passengers_queue > 0 and current_bus_capacity > 0) {
+                if (num_passengers_queue > 0 and current_bus_capacity > 0 and boarding_active == false) {
+                    boarding_active = true;
                     event_id_counter += 1;
                     const duration = try config.boarding_time.sample(random);
-
                     try hp.push(gpa, Event{ .time = t_clock + duration, .type = .boarding, .id = event_id_counter });
                 }
             },
@@ -165,8 +203,9 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                 if (num_passengers_queue > 0 and current_bus_capacity > 0) {
                     // update leaving time of the queue
                     const leaving_user: *User = &passangers_in_queue.items[first_user_in_queue];
-                    leaving_user.leaving = t_clock;
-                    leaving_user.wait_time = t_clock - leaving_user.arrival;
+                    leaving_user.about_to_board = last_event_time; // Last Event Time = t_clock - dt
+                    leaving_user.boarded = t_clock; // Last Event Time + dt = t_clock
+                    leaving_user.queue_time = last_event_time - leaving_user.arrival;
                     first_user_in_queue += 1;
 
                     num_passengers_queue -= 1;
@@ -179,15 +218,23 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
 
                         try hp.push(gpa, Event{ .time = t_clock + duration, .type = .boarding, .id = event_id_counter });
                     } else { // Si la capacitat del bus és 0, aleshores marxa
+                        boarding_active = false;
                         const passengers_on_bus = realized_bus_capacity - current_bus_capacity;
-
+                        const bus_depature_time: f64 = t_clock;
                         const start_index: usize = first_user_in_queue - passengers_on_bus;
                         for (start_index..first_user_in_queue) |i| {
-                            var processed_user: *User = &passangers_in_queue.items[i];
-                            const s_time = t_clock - processed_user.leaving.?;
-                            processed_user.service_time = s_time;
-
+                            const processed_user: *User = &passangers_in_queue.items[i];
+                            processed_user.*.departure = bus_depature_time;
+                            const s_time = t_clock - processed_user.about_to_board.?;
+                            processed_user.*.service_time = s_time;
+                            processed_user.*.system_time = processed_user.service_time.? + processed_user.queue_time.?;
                             total_service_time += s_time;
+                            // if (processed_user.departure) |departure| {
+                            //     std.debug.print("{d}\n", .{departure});
+                            // } else {
+                            //     std.debug.print("Error!!!!\n", .{});
+                            // }
+
                             served_users_count += 1;
                         }
                         realized_bus_capacity = 0;
@@ -196,6 +243,7 @@ pub fn eventSchedulingBus(gpa: Allocator, random: Random, config: SimConfig) !Si
                 }
             },
         }
+        last_event_time = t_clock;
     }
 
     const mean_service = if (served_users_count > 0) total_service_time / @as(f64, @floatFromInt(served_users_count)) else 0.0;
@@ -238,7 +286,7 @@ pub fn main() !void {
     const config = SimConfig{
         .horizon = 100000.0,
         .passenger_interarrival = Distribution{ .exponential = 5.0 }, // lambda
-        .bus_interarrival = Distribution{ .exponential = 4.0 }, // mu
+        .bus_interarrival = Distribution{ .exponential = 2.0 }, // mu
         .bus_capacity = Distribution{ .constant = 3.0 }, // X
         .boarding_time = Distribution{ .constant = 1e-16 }, // minim perque no importa
         .system_capacity = 9, // K
@@ -250,13 +298,19 @@ pub fn main() !void {
     var results = try eventSchedulingBus(gpa, rng, config);
     defer results.users_report.deinit(gpa);
     defer results.traca.deinit(gpa);
+    for (results.traca.items) |event| {
+        try stdout.print("{any}\n", .{event});
+    }
+
     var acc_wait: f64 = 0;
     var counter_wait: usize = 0;
+
     for (results.users_report.items) |user| {
-        if (user.wait_time) |wait_time| {
-            acc_wait += wait_time;
+        if (user.queue_time) |queue_time| {
+            acc_wait += queue_time;
             counter_wait += 1;
         }
+        try stdout.print("{f}\n", .{user});
     }
     const mean_wait_time = if (counter_wait > 0) acc_wait / @as(f64, @floatFromInt(counter_wait)) else 0.0;
 
